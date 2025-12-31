@@ -1,0 +1,7 @@
+google-genai
+mcp
+python-dotenv
+streamlit
+httpx
+fastmcp
+Pillow

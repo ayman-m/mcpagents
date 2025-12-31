@@ -1,0 +1,322 @@
+commonfields:
+  id: ESET
+  version: -1
+vcShouldKeepItemLegacyProdMachine: false
+name: ESET
+display: ESET
+category: Utilities
+description: Run a single ESET agent prompt against the Osiris MCP using Gemini or
+  Vertex AI.
+detaileddescription: |-
+  ## ESET Agent (MCP)
+  This integration runs a single command that sends a prompt to the ESET agent, which can call Osiris MCP tools and return the response.
+
+  ### Requirements
+  - A reachable Osiris MCP endpoint (streamable HTTP).
+  - MCP authentication token.
+  - Gemini API key or Vertex AI service account credentials.
+
+  ### Notes
+  - Use Vertex AI by providing the service account JSON (contents or path) and project ID.
+  - If the MCP endpoint uses a self-signed certificate, enable **Allow self-signed MCP TLS**.
+sectionorder:
+- Connect
+- Collect
+configuration:
+- supportedModules: []
+  section: Connect
+  display: MCP URL
+  name: mcp_url
+  defaultvalue: https://mcp.ayman.online:9010/api/v1/stream/mcp
+  type: 0
+  required: true
+- supportedModules: []
+  display: MCP Authentication Key
+  name: mcp_auth_token
+  type: 4
+  required: true
+- supportedModules: []
+  display: Allow self-signed MCP TLS
+  name: mcp_insecure
+  type: 8
+  required: false
+- supportedModules: []
+  display: Gemini Model
+  name: gemini_model
+  defaultvalue: gemini-3-pro-preview
+  type: 0
+  required: false
+- supportedModules: []
+  display: Gemini API Key (optional if using Vertex)
+  name: gemini_api_key
+  type: 4
+  required: false
+- supportedModules: []
+  display: Vertex Project ID
+  name: vertex_project
+  type: 0
+  required: false
+- supportedModules: []
+  display: Google Cloud Project ID (fallback)
+  name: google_cloud_project
+  type: 0
+  required: false
+- supportedModules: []
+  display: Vertex Service Account JSON (contents or path)
+  name: vertex_credentials_json
+  type: 4
+  required: false
+- supportedModules: []
+  section: Connect
+  advanced: true
+  display: Trust any certificate (not secure)
+  name: insecure
+  type: 8
+  required: false
+script:
+  commands:
+  - supportedModules: []
+    name: eset-agent-run
+    arguments:
+    - supportedModules: []
+      name: prompt
+      required: true
+      description: The user prompt to send to the agent.
+    outputs:
+    - contextPath: ESET.Agent.Response
+      description: Agent response text.
+      type: String
+    description: Run a single ESET agent prompt via MCP tools.
+    execution: true
+  script: |
+    import asyncio
+    import json
+    import logging
+    import os
+    import tempfile
+
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+    import httpx
+    from google import genai
+    from google.genai import types
+
+    logger = logging.getLogger(__name__)
+
+
+    def _httpx_client_factory(insecure: bool):
+        def factory(**kwargs):
+            kwargs["verify"] = not insecure
+            return httpx.AsyncClient(**kwargs)
+        return factory
+
+
+    class CortexMCPClient:
+        def __init__(self, base_url: str, api_key: str | None, insecure: bool):
+            transport = StreamableHttpTransport(
+                url=base_url,
+                httpx_client_factory=_httpx_client_factory(insecure)
+            )
+            self.client = Client(transport, auth=api_key)
+
+        async def __aenter__(self):
+            await self.client.__aenter__()
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            await self.client.__aexit__(exc_type, exc_val, exc_tb)
+
+        async def list_tools(self):
+            return await self.client.list_tools()
+
+        async def call_tool(self, name, arguments):
+            return await self.client.call_tool(name, arguments)
+
+
+    def _sanitize_schema(schema, defs=None, depth=0, processing=None):
+        if not isinstance(schema, dict):
+            return schema
+        if depth > 10:
+            return {"type": "object", "description": "Complex/Deeply nested object"}
+
+        processing = processing or set()
+        current_defs = defs or {}
+        s = dict(schema)
+
+        if "$defs" in s:
+            current_defs.update(s.pop("$defs"))
+        if "definitions" in s:
+            current_defs.update(s.pop("definitions"))
+
+        if "$ref" in s:
+            ref = s.pop("$ref")
+            ref_name = ref.split("/")[-1]
+            if ref_name in processing:
+                return {"type": "object", "description": f"Recursive reference to {ref_name}"}
+            if ref_name in current_defs:
+                processing.add(ref_name)
+                try:
+                    resolved = _sanitize_schema(current_defs[ref_name].copy(), current_defs, depth + 1, processing.copy())
+                    s.update(resolved)
+                finally:
+                    processing.discard(ref_name)
+            else:
+                s["type"] = "string"
+                s["description"] = f"Reference to {ref_name}"
+
+        for key in ("oneOf", "anyOf", "allOf"):
+            if key in s:
+                s.pop(key, None)
+                s["type"] = "object"
+                s["description"] = s.get("description", "Complex variant type") + " (Validation simplified)"
+                return s
+
+        if "properties" in s:
+            for k, v in s["properties"].items():
+                s["properties"][k] = _sanitize_schema(v, current_defs, depth + 1, processing)
+
+        if "items" in s:
+            s["items"] = _sanitize_schema(s["items"], current_defs, depth + 1, processing)
+
+        return s
+
+
+    def _resolve_credentials_path(creds_value: str | None) -> str | None:
+        if not creds_value:
+            return None
+        trimmed = creds_value.strip()
+        if trimmed.startswith("{"):
+            fd, path = tempfile.mkstemp(suffix=".json")
+            with os.fdopen(fd, "w") as f:
+                f.write(trimmed)
+            return path
+        return trimmed
+
+
+    def _create_genai_client(api_key: str | None, creds_path: str | None, project_id: str | None, model_name: str):
+        # Ignore placeholder API key
+        if api_key and api_key.strip().lower() not in {"your_gemini_key", "changeme", "placeholder"}:
+            return genai.Client(api_key=api_key)
+
+        if creds_path and os.path.exists(creds_path):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+            if not project_id:
+                try:
+                    with open(creds_path, "r") as f:
+                        project_id = json.load(f).get("project_id")
+                except Exception:
+                    project_id = None
+            # ensure project is exported for ADC
+            if project_id:
+                os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
+                os.environ["GCLOUD_PROJECT"] = project_id
+            location = "global" if "gemini-3" in model_name.lower() or "experimental" in model_name.lower() else "us-central1"
+            if project_id:
+                return genai.Client(vertexai=True, project=project_id, location=location)
+
+        return None
+
+
+    async def run_agent(prompt: str, params: dict):
+        mcp_url = params.get("mcp_url") or "https://mcp-xsiam:9010/api/v1/stream/mcp"
+        mcp_token = params.get("mcp_auth_token")
+        mcp_insecure = bool(params.get("mcp_insecure", False))
+        model_name = params.get("gemini_model") or "gemini-2.0-flash-exp"
+        debug_log: list[str] = []
+
+        api_key = params.get("gemini_api_key")
+        creds_path = _resolve_credentials_path(params.get("vertex_credentials_json"))
+        project_id = params.get("vertex_project") or params.get("google_cloud_project")
+
+        client = _create_genai_client(api_key, creds_path, project_id, model_name)
+        if not client:
+            return "Error: Neither GEMINI_API_KEY nor valid Vertex credentials/project were provided."
+
+        debug_log.append(f"MCP URL: {mcp_url} (insecure TLS: {mcp_insecure})")
+        async with CortexMCPClient(mcp_url, mcp_token, mcp_insecure) as mcp_client:
+            tools_response = await mcp_client.list_tools()
+            tools_list = tools_response if isinstance(tools_response, list) else tools_response.tools
+            debug_log.append(f"Loaded {len(tools_list)} tools from MCP")
+
+            function_declarations = []
+            for tool in tools_list:
+                schema = getattr(tool, "parameters", getattr(tool, "inputSchema", {}))
+                clean_schema = _sanitize_schema(schema.copy())
+                function_declarations.append(
+                    types.FunctionDeclaration(
+                        name=tool.name,
+                        description=tool.description,
+                        parameters=clean_schema
+                    )
+                )
+
+            config = types.GenerateContentConfig(
+                system_instruction=(
+                    "You are an advanced Security Analyst Agent for Cortex XSIAM. "
+                    "Use MCP tools when needed and provide clear, actionable responses."
+                ),
+                tools=[types.Tool(function_declarations=function_declarations)] if function_declarations else None,
+            )
+
+            chat = client.chats.create(model=model_name, config=config)
+            response = chat.send_message(prompt)
+
+            while response and response.function_calls:
+                parts = []
+                for call in response.function_calls:
+                    debug_log.append(f"Tool Call: {call.name} args={call.args}")
+                    result = await mcp_client.call_tool(call.name, call.args)
+                    result_preview = str(result.content)
+                    if len(result_preview) > 500:
+                        result_preview = result_preview[:500] + "... (truncated)"
+                    debug_log.append(f"Tool Result: {call.name} -> {result_preview}")
+                    parts.append(
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                name=call.name,
+                                response={"result": result.content}
+                            )
+                        )
+                    )
+                response = chat.send_message(parts)
+
+            return response.text, "\n".join(debug_log)
+
+
+    def main():
+        params = demisto.params()
+        command = demisto.command()
+
+        if command == "test-module":
+            return_results("ok")
+            return
+
+        if command != "eset-agent-run":
+            return_error(f"Command '{command}' is not supported.")
+
+        args = demisto.args()
+        prompt = args.get("prompt") or args.get("text") or ""
+        if not prompt:
+            return_error("Missing required argument: prompt")
+
+        result, debug = asyncio.run(run_agent(prompt, params))
+
+        readable = f"### ESET Agent Response\n{result}\n\n### Tool Calls / Debug\n{debug or 'No tool calls logged.'}"
+
+        return_results(CommandResults(
+            readable_output=readable,
+            outputs={
+                "ESET.Agent.Response": result,
+                "ESET.Agent.Debug": debug,
+            },
+            outputs_prefix="ESET.Agent",
+            outputs_key_field="Response",
+        ))
+
+
+    if __name__ in ("__main__", "__builtin__", "builtins"):
+        main()
+  type: python
+  dockerimage: aymanam/xsiameset:latest
+  subtype: python3
+  runonce: false

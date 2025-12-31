@@ -1,0 +1,33 @@
+# SSL Certificates
+ssl_cert.pem
+ssl_key.pem
+cert.pem
+key.pem
+
+# Don't ignore the icon
+!icon.png
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

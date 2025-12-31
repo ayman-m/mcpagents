@@ -1,0 +1,11 @@
+fastmcp
+httpx
+google-genai
+google-auth
+slack-bolt
+slack-sdk
+requests
+urllib3
+python-dotenv
+demisto-py
+pydub
