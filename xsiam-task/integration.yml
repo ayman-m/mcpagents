@@ -317,6 +317,6 @@ script:
     if __name__ in ("__main__", "__builtin__", "builtins"):
         main()
   type: python
-  dockerimage: aymanam/xsiameset:latest
+  dockerimage: aymanam/eset:task-latest
   subtype: python3
   runonce: false
