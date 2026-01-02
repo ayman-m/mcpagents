@@ -7,6 +7,7 @@ import urllib3
 import requests
 import time
 import random
+import logging
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
@@ -426,6 +427,7 @@ async def run_agent_async(prompt, mcp_uri, mcp_key, gemini_api_key=None, google_
     # Connect to MCP
     async with CortexMCPClient(mcp_uri, mcp_key) as mcp_client:
         tools_list = []
+        loaded_tool_names = []
         try:
             raw_tools = await mcp_client.list_tools()
             tools_data = raw_tools if isinstance(raw_tools, list) else raw_tools.tools
@@ -433,6 +435,7 @@ async def run_agent_async(prompt, mcp_uri, mcp_key, gemini_api_key=None, google_
             # Sanitize and convert to Gemini Tool
             gemini_funcs = []
             for t in tools_data:
+                loaded_tool_names.append(t.name)
                 schema = getattr(t, "parameters", getattr(t, "inputSchema", {}))
                 clean_schema = sanitize_schema(schema.copy())
                 gemini_funcs.append(types.FunctionDeclaration(
@@ -440,10 +443,11 @@ async def run_agent_async(prompt, mcp_uri, mcp_key, gemini_api_key=None, google_
                     description=t.description,
                     parameters=clean_schema
                 ))
+                demisto.debug(f"Registered MCP tool: {t.name}")
 
             if gemini_funcs:
                 tools_list = [types.Tool(function_declarations=gemini_funcs)]
-                demisto.debug(f"Loaded {len(gemini_funcs)} MCP tools.")
+                demisto.debug(f"Loaded {len(gemini_funcs)} MCP tools total.")
 
         except Exception as e:
             demisto.error(f"MCP Connection Warning: {e}")
@@ -484,7 +488,7 @@ The architecture is a centralized SOC/NOC stack where **Palo Alto Networks (Cort
 - **Files**: Cisco -> Palo Alto (Analysis).
 
 **Your Persona & Guidelines:**
-- **Team Member**: You are not a robot; you are a valued member of the Troy SOC team. Act like a colleague—be collaborative, encouraging, and clear. Your handle on slack starts with PreCog so you are able to recgonize your own messages in a thread if called multiple times
+- **Team Member**: You are not a robot; you are a valued member of the Troy SOC team. Act like a colleague—be collaborative, encouraging, and clear. Your handle on slack starts with ESET so you are able to recgonize your own messages in a thread if called multiple times
 - **Human-Like**: Use natural language. Avoid overly robotic phrasing. It's okay to show personality (e.g., "Good catch!", "Let's dig into this.").
 - **Vigilant**: Expect hostile traffic from the Training Rooms (Internal) and Registration Servers (External).
 - **Context-Aware**: Understand that an alert from Corelight or Arista isn't isolated—it feeds into XSIAM. Use this context for correlation.
@@ -529,17 +533,17 @@ The architecture is a centralized SOC/NOC stack where **Palo Alto Networks (Cort
                     tool_name = fc.name
                     tool_args = fc.args
 
-                    demisto.debug(f"Agent invoking tool calling: {tool_name}")
+                    demisto.debug(f"Agent invoking tool: {tool_name} with args: {tool_args}")
 
                     try:
                         # Call MCP Tool
                         tool_result = await mcp_client.call_tool(tool_name, tool_args)
-                        result_str = str(tool_result)
+                        demisto.debug(f"Tool {tool_name} returned: {str(tool_result.content)[:500]}")
 
                         response_parts.append(
                             types.Part.from_function_response(
                                 name=tool_name,
-                                response={"result": result_str}
+                                response={"result": tool_result.content}
                             )
                         )
                     except Exception as e:

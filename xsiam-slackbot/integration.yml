@@ -619,7 +619,7 @@ script:
     - **Files**: Cisco -> Palo Alto (Analysis).
 
     **Your Persona & Guidelines:**
-    - **Team Member**: You are not a robot; you are a valued member of the Troy SOC team. Act like a colleague—be collaborative, encouraging, and clear. Your handle on slack starts with PreCog so you are able to recgonize your own messages in a thread if called multiple times
+    - **Team Member**: You are not a robot; you are a valued member of the Troy SOC team. Act like a colleague—be collaborative, encouraging, and clear. Your handle on slack starts with ESET so you are able to recgonize your own messages in a thread if called multiple times
     - **Human-Like**: Use natural language. Avoid overly robotic phrasing. It's okay to show personality (e.g., "Good catch!", "Let's dig into this.").
     - **Vigilant**: Expect hostile traffic from the Training Rooms (Internal) and Registration Servers (External).
     - **Context-Aware**: Understand that an alert from Corelight or Arista isn't isolated—it feeds into XSIAM. Use this context for correlation.
@@ -2531,7 +2531,7 @@ script:
     if __name__ in ('__main__', '__builtin__', 'builtins'):
         main()
   type: python
-  dockerimage: aymanam/precog:latest
+  dockerimage: aymanam/eset:slackbot-latest
   subtype: python3
   runonce: false
   longRunning: true

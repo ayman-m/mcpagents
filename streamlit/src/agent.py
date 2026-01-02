@@ -178,9 +178,10 @@ async def run_agent_async(text, history=None, status_callback=None):
                     description=t.description,
                     parameters=clean_schema
                 ))
-                
+                logger.info(f"Registered MCP tool: {t.name}")
+
             defined_tools = [types.Tool(function_declarations=gemini_funcs)]
-            logger.info(f"Loaded {len(gemini_funcs)} tools from MCP.")
+            logger.info(f"Loaded {len(gemini_funcs)} tools from MCP total.")
             if status_callback:
                 status_callback("MCP", f"Loaded {len(gemini_funcs)} tools", "success")
         except Exception as e:
@@ -258,16 +259,17 @@ The architecture is a centralized SOC/NOC stack where **Palo Alto Networks (Cort
             # Execute tool calls
             parts = []
             for call in response.function_calls:
-                logger.info(f"Calling tool: {call.name} with {call.args}")
+                logger.info(f"Agent invoking tool: {call.name} with args: {call.args}")
                 if status_callback:
                     status_callback("Tool Call", f"Executing **{call.name}**\nArgs: `{call.args}`", "running")
-                    
+
                 try:
                     # Call MCP tool
                     result = await mcp_client.call_tool(call.name, call.args)
-                    
+
                     # Convert result content to string if needed for display
                     result_content = result.content
+                    logger.info(f"Tool {call.name} returned: {str(result_content)[:500]}")
                     if status_callback:
                         status_callback("Tool Result", f"Result from **{call.name}**:\n```\n{str(result_content)[:500]}...\n```", "success")
 
@@ -278,7 +280,9 @@ The architecture is a centralized SOC/NOC stack where **Palo Alto Networks (Cort
                         )
                     ))
                 except Exception as e:
-                    logger.error(f"Tool execution failed: {e}")
+                    logger.error(f"Tool {call.name} failed: {e}")
+                    if status_callback:
+                        status_callback("Tool Error", f"Tool **{call.name}** failed: {str(e)}", "error")
                     parts.append(types.Part(
                         function_response=types.FunctionResponse(
                             name=call.name,
