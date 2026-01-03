@@ -9,19 +9,19 @@
 
 # MCP Agents
 
-Agentic helpers that bridge Gemini/Vertex AI with Cortex MCP tools and XSOAR/XSIAM workflows, plus a Streamlit UI and Slack bot for operators.
+One agent, three interfaces:
+- **Streamlit UI** (standalone HTTPS web app; Docker/Compose ready)
+- **Slackbot** (XSIAM-only; import integration and run as a long-running job)
+- **Task/Playbook** (XSIAM-only; commands callable from playbooks/automations)
 
-## Overview
-- Secure analyst chat UI (Streamlit) with Gemini and MCP tool auto-discovery.
-- Cortex XSOAR/XSIAM actions via a single prompt or Slack mentions.
-- Deployable locally or with Docker Compose; configurable via API keys or Vertex creds.
+All variants auto-discover MCP tools, call them through Gemini/Vertex AI, and share the same backend logic; only the interface differs.
 
 ## Repo layout
-- `streamlit/` — Secure analyst chat UI backed by Gemini, auto-discovers MCP tools, and exposes a polished HTTPS Streamlit front end.
-- `xsiam-task/` — ESET Agent Demisto/XSIAM integration that sends a single prompt to MCP tools via Gemini/Vertex.
-- `xsiam-slackbot/` — Slack bot integration that listens for mentions and can run remote commands or MCP-backed actions through XSOAR/XSIAM.
+- `streamlit/` — Streamlit chat UI. See `streamlit/README.md` (Dockerfile + docker-compose included).
+- `xsiam-slackbot/` — Slack bot integration for Cortex XSIAM. See `xsiam-slackbot/README.md`.
+- `xsiam-task/` — Playbook/command integration for Cortex XSIAM. See `xsiam-task/README.md`.
 
 ## Quick start
-- Streamlit agent UI: `cd streamlit && pip install -r requirements.txt && streamlit run src/main.py` (set `GEMINI_API_KEY` or Vertex creds plus `MCP_URL`/`MCP_AUTH_TOKEN`; use `docker-compose.yml` for a containerized run).
-- XSIAM task integration: import `xsiam-task/integration.yml` into Cortex XSIAM/XSOAR; configure MCP URL/token, Gemini model/API key or Vertex service account, then invoke the `eset-agent-run` command with a prompt.
-- Slack bot: import `xsiam-slackbot/integration.yml`, set Slack bot/app tokens and platform API keys, then deploy to let the bot route Slack mentions into XSOAR/XSIAM (with optional MCP tool access).
+- **Streamlit UI**: `cd streamlit && pip install -r requirements.txt && streamlit run src/main.py` (set `GEMINI_API_KEY` or Vertex creds plus `MCP_URL`/`MCP_TOKEN`; use `docker-compose.yml` for a containerized run with the MCP server).
+- **XSIAM Task**: import `xsiam-task/integration.yml` into XSIAM/XSOAR; configure MCP URL/token, Gemini model/API key or Vertex service account; call the command from a playbook.
+- **Slackbot**: import `xsiam-slackbot/integration.yml`, set Slack bot/app tokens, platform API keys, MCP URL/token, and Gemini/Vertex creds; run as a long-running job in XSIAM.
